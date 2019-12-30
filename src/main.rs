@@ -4,6 +4,7 @@
 extern crate panic_halt;
 use cortex_m_semihosting::{debug, hprintln};
 
+pub mod bus;
 pub mod write_to;
 
 use bme280::BME280;
@@ -32,30 +33,17 @@ use stm32f1xx_hal::{
     prelude::*,
     timer::Timer,
 };
-struct MyMutex<T>(cortex_m::interrupt::Mutex<T>);
-
-impl<T> shared_bus::BusMutex<T> for MyMutex<T> {
-    fn create(v: T) -> MyMutex<T> {
-        MyMutex(cortex_m::interrupt::Mutex::new(v))
-    }
-
-    fn lock<R, F: FnOnce(&T) -> R>(&self, f: F) -> R {
-        cortex_m::interrupt::free(|cs| {
-            let v = self.0.borrow(cs);
-            f(v)
-        })
-    }
-}
-type MyBusManager<L, P> = shared_bus::BusManager<MyMutex<L>, P>;
 
 type I2c<SCL, SDA> = BlockingI2c<I2C1, (SCL, SDA)>;
 
 #[app(device = stm32f1xx_hal::pac, monotonic = rtfm::cyccnt::CYCCNT, peripherals = true)]
 const APP: () = {
-    struct Resources {}
+    struct Resources {
+        BUS: bus::Bus,
+    }
 
     #[init(spawn = [task1])]
-    fn init(ctx: init::Context) {
+    fn init(ctx: init::Context) -> init::LateResources {
         let p = ctx.device;
         let core = ctx.core;
 
@@ -69,8 +57,6 @@ const APP: () = {
 
         let sda = gpiob.pb7.into_alternate_open_drain(&mut gpiob.crl);
         let scl = gpiob.pb6.into_alternate_open_drain(&mut gpiob.crl);
-
-        let delay = AsmDelay::new(bitrate::U32BitrateExt::mhz(72));
 
         let i2c = BlockingI2c::i2c1(
             p.I2C1,
@@ -88,19 +74,36 @@ const APP: () = {
             1000,
         );
 
-        let manager = MyBusManager::new(i2c);
+        let bus = bus::Bus::new(i2c);
 
-        let mut disp: GraphicsMode<_> = Builder::new()
-            .size(DisplaySize::Display128x32)
-            .connect_i2c(manager.acquire())
-            .into();
-        disp.init().unwrap();
+        // let manager = MyBusManager::new(i2c);
 
-        let mut bme280 = BME280::new_primary(manager.acquire(), delay);
-        bme280.init().unwrap();
+        // let mut disp: = Builder::new()
+        //     .size(DisplaySize::Display128x32)
+        //     .connect_i2c(manager.acquire())
+        //     .into();
+        // disp.init().unwrap();
+
+        // let mut bme280 = BME280::new_primary(manager.acquire(), delay);
+        // bme280.init().unwrap();
         ctx.spawn.task1().unwrap();
 
-        let measurements = bme280.measure().unwrap();
+        // let measurements = bme280.measure().unwrap();
+
+        init::LateResources {
+            // PERIPHERALS: p,
+            // I2C: i2c,
+            BUS: bus,
+        }
+    }
+
+    #[task(schedule = [task1], resources = [BUS])]
+    fn task1(ctx: task1::Context) {
+        let now = Instant::now();
+        // let mut bus = &mut ctx.resources.BUS;
+        let (disp, bme) = ctx.resources.BUS.devices_mut();
+        // let disp = ctx.resources.BUS.disp_mut();
+        let measurements = bme.measure().unwrap();
 
         let mut buf = [0 as u8; 20];
 
@@ -115,15 +118,7 @@ const APP: () = {
                 .stroke(Some(BinaryColor::On))
                 .into_iter(),
         );
-    }
-
-    #[task(schedule = [task1])]
-    fn task1(ctx: task1::Context) {
-        let now = Instant::now();
-        // &ctx.resources.LED.set_low().unwrap();
-        // let measurements = &ctx.resources.BME.measure().unwrap();
-
-        // ctx.schedule.task1(now + (PERIOD * 2).cycles()).unwrap()
+        ctx.schedule.task1(now + (PERIOD * 2).cycles()).unwrap()
     }
 
     extern "C" {
