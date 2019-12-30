@@ -218,26 +218,31 @@ type I2c<SCL, SDA> = BlockingI2c<I2C1, (SCL, SDA)>;
 #[app(device = stm32f1xx_hal::pac, monotonic = rtfm::cyccnt::CYCCNT, peripherals = true)]
 const APP: () = {
     struct Resources {
-        // BME: bme280::BME280<
-    //     I2c<PB6<Alternate<OpenDrain>>, PB7<Alternate<OpenDrain>>>,
-    //     asm_delay::AsmDelay,
-    // >,
-    // PERIPHERALS: stm32f1xx_hal::pac::Peripherals,
-    // I2C: stm32f1xx_hal::i2c::BlockingI2c<
-    //     stm32f1::stm32f103::I2C1,
-    //     (
-    //         stm32f1xx_hal::gpio::gpiob::PB6<
-    //             stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
-    //         >,
-    //         stm32f1xx_hal::gpio::gpiob::PB7<
-    //             stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
-    //         >,
-    //     ),
-    // >,
+        BME: bme280::BME280<
+            shared_bus::proxy::BusProxy<
+                '_,
+                MyMutex<
+                    core::cell::RefCell<I2c<PB6<Alternate<OpenDrain>>, PB7<Alternate<OpenDrain>>>>,
+                >,
+            >,
+            asm_delay::AsmDelay,
+        >,
+        // PERIPHERALS: stm32f1xx_hal::pac::Peripherals,
+        // I2C: stm32f1xx_hal::i2c::BlockingI2c<
+        //     stm32f1::stm32f103::I2C1,
+        //     (
+        //         stm32f1xx_hal::gpio::gpiob::PB6<
+        //             stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
+        //         >,
+        //         stm32f1xx_hal::gpio::gpiob::PB7<
+        //             stm32f1xx_hal::gpio::Alternate<stm32f1xx_hal::gpio::OpenDrain>,
+        //         >,
+        //     ),
+        // >,
     }
 
     #[init(spawn = [task1])]
-    fn init(ctx: init::Context) {
+    fn init(ctx: init::Context) -> init::LateResources {
         let p = ctx.device;
         let core = ctx.core;
 
@@ -280,36 +285,34 @@ const APP: () = {
 
         let manager = MyBusManager::new(i2c);
 
-        let mut disp: GraphicsMode<_> = Builder::new()
-            .size(DisplaySize::Display128x32)
-            .connect_i2c(manager.acquire())
-            .into();
-        disp.init().unwrap();
+        // let mut disp: GraphicsMode<_> = Builder::new()
+        //     .size(DisplaySize::Display128x32)
+        //     .connect_i2c(manager.acquire())
+        //     .into();
+        // disp.init().unwrap();
 
         let mut bme280 = BME280::new_primary(manager.acquire(), delay);
         bme280.init().unwrap();
         ctx.spawn.task1().unwrap();
 
-        let measurements = bme280.measure().unwrap();
-
         // hprintln!("{}", measurements.temperature);
         // let mut buf = String::<u8>::new();
-        let mut buf = [0 as u8; 20];
+        // let mut buf = [0 as u8; 20];
 
         // write!(&mut buf[..], "Count: {}", measurements.temperature);
 
         // let mut buf = [0u8; 64];
-        let s: &str = write_to::show(
-            &mut buf,
-            format_args!("temperature: {} deg C", measurements.temperature),
-        )
-        .unwrap();
+        // let s: &str = write_to::show(
+        //     &mut buf,
+        //     format_args!("temperature: {} deg C", measurements.temperature),
+        // )
+        // .unwrap();
 
-        disp.draw(
-            Font6x8::render_str(&s)
-                .stroke(Some(BinaryColor::On))
-                .into_iter(),
-        );
+        // disp.draw(
+        //     Font6x8::render_str(&s)
+        //         .stroke(Some(BinaryColor::On))
+        //         .into_iter(),
+        // );
         // disp.draw(
         //     Font6x8::render_str(measurements.temperature.to_string())
         //         .stroke(Some(BinaryColor::On))
@@ -322,11 +325,11 @@ const APP: () = {
         // );
         // disp.flush().unwrap();
 
-        // init::LateResources {
-        // PERIPHERALS: p,
-        // I2C: i2c,
-        // BME: bme280,
-        // }
+        init::LateResources {
+            // PERIPHERALS: p,
+            // I2C: i2c,
+            BME: bme280,
+        }
     }
 
     // #[task(schedule = [task2], resources = [LED])]
@@ -340,13 +343,13 @@ const APP: () = {
     //     ctx.schedule.task2(now + PERIOD.cycles()).unwrap()
     // }
 
-    #[task(schedule = [task1])]
+    #[task(schedule = [task1], resources = [BME])]
     fn task1(ctx: task1::Context) {
         let now = Instant::now();
         // &ctx.resources.LED.set_low().unwrap();
-        // let measurements = &ctx.resources.BME.measure().unwrap();
+        let measurements = &ctx.resources.BME.measure().unwrap();
 
-        // ctx.schedule.task1(now + (PERIOD * 2).cycles()).unwrap()
+        ctx.schedule.task1(now + (PERIOD * 2).cycles()).unwrap()
     }
 
     extern "C" {

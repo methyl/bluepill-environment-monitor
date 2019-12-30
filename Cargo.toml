@@ -13,6 +13,12 @@ cortex-m-rtfm = "0.5.1"
 panic-halt = "0.2.0"
 embedded-hal = "0.2.3"
 ssd1306 = "0.3.0-alpha.2"
+bme280 = "0.1.2"
+shared-bus = "0.1.4"
+alloc-cortex-m = "0.3.5"
+asm-delay = "0.7.0"
+bitrate = "0.1.1"
+
 
 [dependencies.stm32f1]
 version = "0.9.0"
