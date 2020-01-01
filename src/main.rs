@@ -35,6 +35,7 @@ use stm32f1xx_hal::{
         Alternate, Edge, ExtiPin, Floating, Input, OpenDrain, PullDown,
     },
     i2c::{BlockingI2c, DutyCycle, Mode},
+    pac::Interrupt,
     prelude::*,
     timer::Timer,
 };
@@ -56,7 +57,7 @@ const APP: () = {
         CURRENT_SCREEN: u8,
     }
 
-    #[init(spawn = [measure_environment])]
+    #[init]
     fn init(ctx: init::Context) -> init::LateResources {
         let p = ctx.device;
         let mut core = ctx.core;
@@ -88,7 +89,7 @@ const APP: () = {
             (scl, sda),
             &mut afio.mapr,
             Mode::Fast {
-                frequency: stm32f1xx_hal::time::U32Ext::hz(100_000),
+                frequency: stm32f1xx_hal::time::U32Ext::hz(400_000),
                 duty_cycle: DutyCycle::Ratio2to1,
             },
             clocks,
@@ -101,7 +102,8 @@ const APP: () = {
 
         let bus = bus::Bus::new(i2c);
 
-        ctx.spawn.measure_environment().unwrap();
+        // ctx.spawn.measure_environment().unwrap();
+        rtfm::pend(Interrupt::TIM3);
 
         init::LateResources {
             BUS: bus,
@@ -121,7 +123,7 @@ const APP: () = {
         }
     }
 
-    #[task(schedule = [refresh_display], capacity = 2, resources = [BUS, MEASUREMENTS, CURRENT_SCREEN])]
+    #[task(schedule = [refresh_display], resources = [BUS, MEASUREMENTS, CURRENT_SCREEN])]
     fn refresh_display(ctx: refresh_display::Context) {
         let current_screen = ctx.resources.CURRENT_SCREEN;
         let devices = ctx.resources.BUS.devices_mut();
@@ -227,7 +229,7 @@ const APP: () = {
             .unwrap();
     }
 
-    #[task(schedule = [measure_environment], spawn = [refresh_display], resources = [BUS, MEASUREMENTS, REFRESH_DISPLAY_SPAWNED])]
+    #[task(binds = TIM3, spawn = [refresh_display], resources = [BUS, MEASUREMENTS, REFRESH_DISPLAY_SPAWNED])]
     fn measure_environment(ctx: measure_environment::Context) {
         let devices = ctx.resources.BUS.devices_mut();
         let bme = &mut devices.bme;
@@ -245,9 +247,7 @@ const APP: () = {
             ctx.spawn.refresh_display().unwrap();
         }
 
-        ctx.schedule
-            .measure_environment(Instant::now() + 100.cycles())
-            .unwrap();
+        rtfm::pend(Interrupt::TIM3);
     }
 
     extern "C" {
