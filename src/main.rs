@@ -44,18 +44,7 @@ type I2c<SCL, SDA> = BlockingI2c<I2C1, (SCL, SDA)>;
 pub struct MeasurementEntry {
     pub temperature: u16,
 }
-// use core::mem::MaybeUninit;
-// use stm32f1xx_hal::pac::interrupt;
 
-// static mut EXTI: MaybeUninit<stm32f1xx_hal::gpio::gpioa::PA7<Input<PullDown>>> =
-//     MaybeUninit::uninit();
-
-// #[interrupt]
-// fn EXTI9_5() {
-//     // let led = unsafe { &mut *LED.as_mut_ptr() };
-//     let exti = unsafe { &mut *EXTI.as_mut_ptr() };
-
-// }
 #[app(device = stm32f1xx_hal::pac, monotonic = rtfm::cyccnt::CYCCNT, peripherals = true)]
 const APP: () = {
     struct Resources {
@@ -83,10 +72,7 @@ const APP: () = {
         let clocks = rcc.cfgr.freeze(&mut flash.acr);
         let mut afio = p.AFIO.constrain(&mut rcc.apb2);
 
-        // let exti: &stm32f1xx_hal::gpio::gpioa::PA7<Input<PullDown>> =
-        //     unsafe { &mut *Resources.EXTI.as_mut_ptr() };
-        let mut exti: stm32f1xx_hal::gpio::gpioa::PA4<Input<PullDown>> =
-            gpioa.pa4.into_pull_down_input(&mut gpioa.crl);
+        let mut exti = gpioa.pa4.into_pull_down_input(&mut gpioa.crl);
         exti.make_interrupt_source(&mut afio);
         exti.trigger_on_edge(&p.EXTI, Edge::FALLING);
         exti.enable_interrupt(&p.EXTI);
@@ -115,23 +101,9 @@ const APP: () = {
 
         let bus = bus::Bus::new(i2c);
 
-        // let manager = MyBusManager::new(i2c);
-
-        // let mut disp: = Builder::new()
-        //     .size(DisplaySize::Display128x32)
-        //     .connect_i2c(manager.acquire())
-        //     .into();
-        // disp.init().unwrap();
-
-        // let mut bme280 = BME280::new_primary(manager.acquire(), delay);
-        // bme280.init().unwrap();
         ctx.spawn.measure_environment().unwrap();
 
-        // let measurements = bme280.measure().unwrap();
-
         init::LateResources {
-            // PERIPHERALS: p,
-            // I2C: i2c,
             BUS: bus,
             MEASUREMENTS: Vec::new(),
             REFRESH_DISPLAY_SPAWNED: false,
@@ -145,12 +117,7 @@ const APP: () = {
 
         if exti.check_interrupt() {
             *c.resources.CURRENT_SCREEN = (*c.resources.CURRENT_SCREEN + 1) % 2;
-
-            // led.toggle();
-
-            // if we don't clear this bit, the ISR would trigger indefinitely
             exti.clear_interrupt_pending_bit();
-            // c.spawn.refresh_display().unwrap();
         }
     }
 
@@ -179,12 +146,6 @@ const APP: () = {
                 );
             }
 
-            // let temperatures: Vec<u16, U32> = measurements
-            //     .iter()
-            //     .map(|measurement| measurement.temperature)
-            //     .collect();
-            // .chunks(32);
-            // .map(|chunk| chunk.sum() / 32);
             disp.draw(
                 Line::new(Point::new(0, 31), Point::new(127, 31)).stroke(Some(BinaryColor::On)),
             );
