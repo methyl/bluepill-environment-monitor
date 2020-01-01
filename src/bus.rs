@@ -22,9 +22,13 @@ use asm_delay::AsmDelay;
 use core::cell::RefCell;
 use core::mem::transmute;
 use core::ops::Deref;
+use embedded_graphics::fonts::Font6x8;
+use embedded_graphics::pixelcolor::BinaryColor;
+use embedded_graphics::prelude::*;
+use embedded_graphics::text_6x8;
+use embedded_hal::digital::v2::OutputPin;
 use shared_bus::{BusManager, BusProxy};
 use stm32f1::stm32f103::I2C1;
-
 /// NOP mutex. It does nothing. We manage all I²C devices together
 /// with the manager in one struct. They are one RTFM resource, so
 /// that the whole bus is ceiling-analyzed and locked together by
@@ -78,17 +82,18 @@ type DISP<'a> = GraphicsMode<I2cInterface<Proxy<'a>>>;
 
 /// Structure that holds bus and all its devices together. Manager is
 /// inside the struct as an attempt to keep the lifetime synchronized.
-pub struct Bus
-// where
-//     T: Deref<Target = lpi2c::RegisterBlock>,
-{
+pub struct Bus {
     _manager: Manager,
 
     // We use 'static private struct members and then downcast them to
     // shorter lifetimes in public accessor methods.  Trick described
     // in https://stackoverflow.com/a/33203128/16390
-    bme: BME<'static>,
-    disp: DISP<'static>,
+    devices: Devices<'static>,
+}
+
+pub struct Devices<'a> {
+    pub bme: BME<'a>,
+    pub disp: DISP<'a>,
 }
 
 // I'm not 100% confident in what I'm doing here, but Bus owns the
@@ -96,51 +101,39 @@ pub struct Bus
 // the Peripheral) and all the devices, and doesn't allow safe access
 // to the peripheral or manager, so it seems safe to send across
 // threads, right?
-unsafe impl Send for Bus
-// where T: Deref<Target = lpi2c::RegisterBlock>
-{
-}
+unsafe impl Send for Bus {}
 
-impl Bus
-// where
-//     T: Deref<Target = lpi2c::RegisterBlock>,
-{
+impl Bus {
     /// Returns new I²C bus with all the devices used by project.
     pub fn new(i2c: Device) -> Self {
         let manager = Manager::new(i2c);
         let delay = AsmDelay::new(bitrate::U32BitrateExt::mhz(72));
-        let bme: BME<'static> = unsafe { transmute(BME280::new_primary(manager.acquire(), delay)) };
-        let disp: DISP<'static> = unsafe {
-            let disp: GraphicsMode<_> = Builder::new()
+        let mut bme: BME<'static> = unsafe {
+            let mut bme = BME280::new_primary(manager.acquire(), delay);
+            transmute(bme)
+        };
+        let mut disp: DISP<'static> = unsafe {
+            let mut disp: GraphicsMode<_> = Builder::new()
                 .size(DisplaySize::Display128x32)
                 .connect_i2c(manager.acquire())
                 .into();
 
             transmute(disp)
         };
+        bme.init().unwrap();
+
+        disp.init().unwrap();
 
         Self {
             _manager: manager,
-            bme: bme,
-            disp: disp,
+            devices: Devices {
+                bme: bme,
+                disp: disp,
+            },
         }
     }
 
-    // pub fn bme<'a>(&'a self) -> &'a BME<'a> {
-    //     &self.bme
-    // }
-
-    // pub fn bme_mut<'a>(&'a mut self) -> &'a mut BME<'a> {
-    //     unsafe { transmute(&mut self.bme) }
-    // }
-
-    // pub fn disp<'a>(&'a self) -> &'a DISP<'a> {
-    //     &self.disp
-    // }
-
-    pub fn devices_mut<'a>(&'a mut self) -> (&'a mut DISP<'a>, &'a mut BME<'a>) {
-        (unsafe { transmute(&mut self.disp) }, unsafe {
-            transmute(&mut self.bme)
-        })
+    pub fn devices_mut<'a>(&'a mut self) -> (&'a mut Devices<'a>) {
+        unsafe { transmute(&mut self.devices) }
     }
 }

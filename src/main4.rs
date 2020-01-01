@@ -120,63 +120,59 @@ use cortex_m_semihosting::{debug, hprintln};
 
 use rtfm::app;
 use rtfm::cyccnt::{Instant, U32Ext as _};
-// use stm32f1::stm32f103 as target;
+use stm32f1::stm32f103 as target;
 
-const PERIOD: u32 = 4_000_000;
-use embedded_hal::digital::v2::OutputPin;
-use stm32f1xx_hal::{prelude::*, timer::Timer};
+const PERIOD: u32 = 2_000_000;
 
-#[app(device = stm32f1xx_hal::pac, monotonic = rtfm::cyccnt::CYCCNT, peripherals = true)]
+#[app(device = stm32f1::stm32f103, monotonic = rtfm::cyccnt::CYCCNT, peripherals = true)]
 const APP: () = {
-  struct Resources {
-    // PERIPHERALS: stm32f1xx_hal::pac::Peripherals,
-    LED:
-      stm32f1xx_hal::gpio::gpioc::PC13<stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>>,
-  }
-
-  #[init(spawn = [task1])]
-  fn init(ctx: init::Context) -> init::LateResources {
-    let p = ctx.device;
-
-    let mut rcc = p.RCC.constrain();
-    // let gpioc = &p.GPIOC;
-    let mut gpioc = p.GPIOC.split(&mut rcc.apb2);
-
-    // rcc.apb2enr.write(|w| w.iopcen().set_bit());
-    // gpioc
-    //     .crh
-    //     .write(|w| w.mode13().bits(0b11).cnf13().bits(0b00));
-
-    ctx.spawn.task1().unwrap();
-    let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
-
-    init::LateResources {
-      // PERIPHERALS: p,
-      LED: led,
+    struct Resources {
+        PERIPHERALS: target::Peripherals,
     }
-  }
 
-  #[task(schedule = [task2], resources = [LED])]
-  fn task1(ctx: task1::Context) {
-    let now = Instant::now();
+    #[init(spawn = [task1])]
+    fn init(ctx: init::Context) -> init::LateResources {
+        let p = ctx.device;
 
-    // let gpioc = &ctx.resources.PERIPHERALS.GPIOC;
+        let rcc = &p.RCC;
+        let gpioc = &p.GPIOC;
 
-    // gpioc.bsrr.write(|w| w.bs13().set_bit());
-    &ctx.resources.LED.set_high().unwrap();
+        rcc.apb2enr.write(|w| w.iopcen().set_bit());
+        gpioc
+            .crh
+            .write(|w| w.mode13().bits(0b11).cnf13().bits(0b00));
+        gpioc.bsrr.write(|w| w.bs13().set_bit());
 
-    ctx.schedule.task2(now + PERIOD.cycles()).unwrap()
-  }
+        ctx.spawn.task1().unwrap();
 
-  #[task(schedule = [task1], resources = [LED])]
-  fn task2(ctx: task2::Context) {
-    let now = Instant::now();
-    &ctx.resources.LED.set_low().unwrap();
+        init::LateResources { PERIPHERALS: p }
+    }
 
-    ctx.schedule.task1(now + PERIOD.cycles()).unwrap()
-  }
+    #[task(schedule = [task2], resources = [PERIPHERALS])]
+    fn task1(ctx: task1::Context) {
+        hprintln!("bar  @ {:?}", Instant::now()).unwrap();
+        let now = Instant::now();
 
-  extern "C" {
-    fn TIM2();
-  }
+        let gpioc = &ctx.resources.PERIPHERALS.GPIOC;
+
+        gpioc.bsrr.write(|w| w.bs13().set_bit());
+
+        ctx.schedule.task2(now + PERIOD.cycles()).unwrap()
+    }
+
+    #[task(schedule = [task1], resources = [PERIPHERALS])]
+    fn task2(ctx: task2::Context) {
+        hprintln!("bar  @ {:?}", Instant::now()).unwrap();
+
+        let now = Instant::now();
+        let gpioc = &ctx.resources.PERIPHERALS.GPIOC;
+
+        gpioc.brr.write(|w| w.br13().set_bit());
+
+        ctx.schedule.task1(now + PERIOD.cycles()).unwrap()
+    }
+
+    extern "C" {
+        fn TIM2();
+    }
 };

@@ -1,5 +1,6 @@
 #![no_std]
 #![no_main]
+// extern crate panic_semihosting;
 
 // pick a panicking behavior
 extern crate panic_halt; // you can put a breakpoint on `rust_begin_unwind` to catch panics
@@ -118,54 +119,58 @@ use cortex_m_semihosting::{debug, hprintln};
 //     // }
 // };
 
-use rtfm::app;
-use rtfm::cyccnt::{Instant, U32Ext as _};
-use stm32f1::stm32f103 as target;
-
-const PERIOD: u32 = 2_000_000;
-
-#[app(device = stm32f1::stm32f103, monotonic = rtfm::cyccnt::CYCCNT, peripherals = true)]
 const APP: () = {
     struct Resources {
-        PERIPHERALS: target::Peripherals,
+        // PERIPHERALS: stm32f1xx_hal::pac::Peripherals,
+        LED: stm32f1xx_hal::gpio::gpioc::PC13<
+            stm32f1xx_hal::gpio::Output<stm32f1xx_hal::gpio::PushPull>,
+        >,
     }
 
     #[init(spawn = [task1])]
     fn init(ctx: init::Context) -> init::LateResources {
         let p = ctx.device;
-
-        let rcc = &p.RCC;
-        let gpioc = &p.GPIOC;
-
-        rcc.apb2enr.write(|w| w.iopcen().set_bit());
-        gpioc
-            .crh
-            .write(|w| w.mode13().bits(0b11).cnf13().bits(0b00));
+        let mut flash = p.FLASH.constrain();
+        let mut rcc = p.RCC.constrain();
+        // let gpioc = &p.GPIOC;
+        let mut _afio = p.AFIO.constrain(&mut rcc.apb2);
+        let mut gpioc = p.GPIOC.split(&mut rcc.apb2);
+        let _clocks = rcc
+            .cfgr
+            .use_hse(8.mhz())
+            .sysclk(72.mhz())
+            .pclk1(36.mhz())
+            .freeze(&mut flash.acr);
+        // rcc.apb2enr.write(|w| w.iopcen().set_bit());
+        // gpioc
+        //     .crh
+        //     .write(|w| w.mode13().bits(0b11).cnf13().bits(0b00));
 
         ctx.spawn.task1().unwrap();
+        let mut led = gpioc.pc13.into_push_pull_output(&mut gpioc.crh);
 
-        init::LateResources { PERIPHERALS: p }
+        init::LateResources {
+            // PERIPHERALS: p,
+            LED: led,
+        }
     }
 
-    #[task(schedule = [task2], resources = [PERIPHERALS])]
+    #[task(schedule = [task2], resources = [LED])]
     fn task1(ctx: task1::Context) {
         let now = Instant::now();
 
-        let gpioc = &ctx.resources.PERIPHERALS.GPIOC;
+        // let gpioc = &ctx.resources.PERIPHERALS.GPIOC;
 
-        gpioc.bsrr.write(|w| w.bs13().set_bit());
-
-        ctx.schedule.task2(now + PERIOD.cycles()).unwrap()
+        // gpioc.bsrr.write(|w| w.bs13().set_bit());
+        &ctx.resources.LED.set_low().unwrap();
+        ctx.schedule.task2(Instant::now())
     }
 
-    #[task(schedule = [task1], resources = [PERIPHERALS])]
+    #[task(schedule = [task1], resources = [LED])]
     fn task2(ctx: task2::Context) {
-        let now = Instant::now();
-        let gpioc = &ctx.resources.PERIPHERALS.GPIOC;
+        &ctx.resources.LED.set_high().unwrap();
 
-        gpioc.brr.write(|w| w.br13().set_bit());
-
-        ctx.schedule.task1(now + PERIOD.cycles()).unwrap()
+        ctx.schedule.task1(Instant::now() + PERIOD.cycles())
     }
 
     extern "C" {
