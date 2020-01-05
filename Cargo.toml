@@ -19,6 +19,8 @@ alloc-cortex-m = "0.3.5"
 asm-delay = "0.7.0"
 bitrate = "0.1.1"
 heapless = "0.5.1"
+mh-z19 = "0.3.0"
+nb = "0.1.2"
 
 [dependencies.stm32f1]
 version = "0.9.0"
