@@ -49,6 +49,12 @@ pub struct MeasurementEntry {
     pub co2_ppm: u32,
 }
 
+pub struct BMEMeasurement {
+    pub temperature: f32,
+    pub humidity: f32,
+    pub pressure: f32,
+}
+
 #[app(device = stm32f1xx_hal::pac, monotonic = rtfm::cyccnt::CYCCNT, peripherals = true)]
 const APP: () = {
     struct Resources {
@@ -66,6 +72,9 @@ const APP: () = {
         >,
         RX: stm32f1xx_hal::serial::Rx<stm32f1::stm32f103::USART1>,
         TX: stm32f1xx_hal::serial::Tx<stm32f1::stm32f103::USART1>,
+        RX3: stm32f1xx_hal::serial::Rx<stm32f1::stm32f103::USART2>,
+        TX3: stm32f1xx_hal::serial::Tx<stm32f1::stm32f103::USART2>,
+        RX3_BUF: Vec<u8, U32>,
     }
 
     #[init(schedule = [measure_environment])]
@@ -135,8 +144,22 @@ const APP: () = {
             clocks,
             &mut rcc.apb2,
         );
-        // serial2.listen(stm32f1xx_hal::serial::Event::Rxne);
         let (mut tx2, mut rx2) = serial2.split();
+
+        let tx3 = gpioa.pa2.into_alternate_push_pull(&mut gpioa.crl);
+        let rx3 = gpioa.pa3;
+
+        let mut serial3 = Serial::usart2(
+            p.USART2,
+            (tx3, rx3),
+            &mut afio.mapr,
+            Config::default().baudrate(stm32f1xx_hal::time::U32Ext::bps(9600)),
+            clocks,
+            &mut rcc.apb1,
+        );
+
+        serial3.listen(stm32f1xx_hal::serial::Event::Rxne);
+        let (mut tx3, mut rx3) = serial3.split();
 
         let mut mhz19 = mhz19::Mhz19::new(tx, rx);
         // mhz19.set_automatic_baseline_correction(false);
@@ -178,6 +201,9 @@ const APP: () = {
             MHZ19: mhz19,
             TX: tx2,
             RX: rx2,
+            TX3: tx3,
+            RX3: rx3,
+            RX3_BUF: Vec::new(),
         }
     }
     #[task(binds = EXTI4,  spawn = [refresh_display], resources = [EXTI, CURRENT_SCREEN])]
@@ -269,7 +295,19 @@ const APP: () = {
         } else if current_screen == &2 {
             let bme = &mut devices.bme;
 
-            let measure = bme.measure().unwrap();
+            let measure = match bme.measure() {
+                Ok(measure) => BMEMeasurement {
+                    temperature: measure.temperature,
+                    pressure: measure.pressure,
+                    humidity: measure.humidity,
+                },
+
+                Err(err) => BMEMeasurement {
+                    temperature: 0.0,
+                    pressure: 0.0,
+                    humidity: 0.0,
+                },
+            };
             let mut buf = [0 as u8; 32];
 
             let mut s: &str = write_to::show(
@@ -348,37 +386,61 @@ const APP: () = {
             .unwrap();
     }
 
-    // #[task(schedule = [receive_uart], resources = [RX, RX_BUF])]
-    // fn receive_uart(ctx: receive_uart::Context) {
-    //     // hprintln!("asdasd");
-    //     // rtfm::pend(Interrupt::TIM4);
+    // #[task(binds = USART2, resources = [RX3, TX3, RX3_BUF])]
+    // fn receive_usart(ctx: receive_usart::Context) {
+    //     // let mut buf: Vec<u8, U32> = Vec::new();
+    //     // let mut buf: [u8; 32] = [0; 32];
+    //     // for i in 0..32 {
+    //     //     if let Ok(byte) = block!(ctx.resources.RX3.read()) {
+    //     //         buf[i] = byte;
+    //     //     }
+    //     // }
 
-    //     match ctx.resources.RX.read() {
+    //     // }
+    //     match ctx.resources.RX3.read() {
     //         Ok(c) => {
-    //             hprintln!("{}", c);
+    //             // ctx.resources.RX3_BUF.push(c);
+    //             // block!(ctx.resources.TX3.write(c));
     //         }
     //         Err(e) => {
     //             // hprintln!("{:?}", e);
     //         }
-    //     }
-
-    //     ctx.schedule
-    //         .receive_uart(Instant::now() + 10.cycles())
-    //         .unwrap();
+    //     };
     // }
 
-    #[task(schedule = [measure_environment], spawn = [refresh_display], resources = [RX, TX, MHZ19, BUS, PM_MEASUREMENTS, CO2_MEASUREMENTS, MEASUREMENTS, REFRESH_DISPLAY_SPAWNED])]
+    #[task(schedule = [measure_environment], spawn = [refresh_display], resources = [RX3_BUF, TX3,RX3, RX, TX, MHZ19, BUS, PM_MEASUREMENTS, CO2_MEASUREMENTS, MEASUREMENTS, REFRESH_DISPLAY_SPAWNED])]
     fn measure_environment(ctx: measure_environment::Context) {
+        // hprintln!("{:?}", ctx.resources.RX3_BUF);
+        // let bytes = [0x42, 0x4D, 0xE2, 0x00, 0x00, 0x01, 0x71];
+        // for byte in bytes.iter() {
+        //     block!(ctx.resources.TX3.write(*byte));
+        // }
+        block!(ctx.resources.TX3.write(b'a'));
+        block!(ctx.resources.TX3.write(b'b'));
+        block!(ctx.resources.TX3.write(b'\r'));
+        block!(ctx.resources.TX3.write(b'\n'));
+        // let byte = block!(ctx.resources.RX3.read()).unwrap();
+        // hprintln!("{}", byte);
+        // let byte = block!(ctx.resources.RX3.read()).unwrap();
+        // hprintln!("{}", byte);
+        // hprintln!("done");
+
+        // for c in ctx.resources.RX3_BUF.iter() {
+        //     block!(ctx.resources.TX3.write(*c));
+        // }
+
         let devices = ctx.resources.BUS.devices_mut();
         let bme = &mut devices.bme;
 
-        let measure = bme.measure().unwrap();
         let mut measurements = ctx.resources.MEASUREMENTS;
         let mut co2_measurements = ctx.resources.CO2_MEASUREMENTS;
         let mut pm_measurements = ctx.resources.PM_MEASUREMENTS;
 
-        if measurements.len() + 1 == measurements.capacity() {
-            measurements.clear();
+        if let Ok(measure) = bme.measure() {
+            if measurements.len() + 1 == measurements.capacity() {
+                measurements.clear();
+            }
+            measurements.push(((measure.temperature * 100.0) as u16));
         }
 
         if co2_measurements.len() + 1 == co2_measurements.capacity() {
@@ -388,7 +450,6 @@ const APP: () = {
         if pm_measurements.len() + 1 == pm_measurements.capacity() {
             pm_measurements.clear();
         }
-        measurements.push(((measure.temperature * 100.0) as u16));
 
         if !*ctx.resources.REFRESH_DISPLAY_SPAWNED {
             *ctx.resources.REFRESH_DISPLAY_SPAWNED = true;

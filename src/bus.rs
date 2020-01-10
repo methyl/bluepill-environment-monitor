@@ -120,7 +120,7 @@ impl Bus {
 
             transmute(disp)
         };
-        bme.init().unwrap();
+        bme.init();
 
         disp.init().unwrap();
 
